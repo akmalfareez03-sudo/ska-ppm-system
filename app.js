@@ -1,4 +1,6 @@
-// Konfigurasi Firebase Projek ska-ppm-system
+// =========================================================================
+// 1. KONFIGURASI FIREBASE CLOUD FIRESTORE
+// =========================================================================
 const firebaseConfig = {
   apiKey: "AIzaSyCUTwGoGfengsUkPO5a9mF-LYm2AwgR3-s",
   authDomain: "ska-ppm-system.firebaseapp.com",
@@ -9,7 +11,6 @@ const firebaseConfig = {
   measurementId: "G-LB7ZJHTM7L"
 };
 
-// Inisialisasi Firebase & Firestore
 let db = null;
 try {
   firebase.initializeApp(firebaseConfig);
@@ -18,6 +19,9 @@ try {
   console.warn("Ralat inisialisasi Firebase:", e);
 }
 
+// =========================================================================
+// 2. ALPINE.JS APLIKASI PPM
+// =========================================================================
 document.addEventListener('alpine:init', () => {
   Alpine.data('ppmApp', () => ({
     currentView: 'main', // 'main', 'category_list', 'checklist'
@@ -67,7 +71,6 @@ document.addEventListener('alpine:init', () => {
       if (!db) return;
       this.isSyncing = true;
 
-      // Pantau dokumen metadata pangkalan data secara langsung
       db.collection('ppm_system').doc('meta').onSnapshot(async (docSnapshot) => {
         if (docSnapshot.exists) {
           const meta = docSnapshot.data();
@@ -75,7 +78,6 @@ document.addEventListener('alpine:init', () => {
           let combinedAssets = [];
 
           try {
-            // Ambil semua serpihan data aset (chunks)
             for (let i = 0; i < chunkCount; i++) {
               const chunkDoc = await db.collection('ppm_system').doc(`assets_chunk_${i}`).get();
               if (chunkDoc.exists && chunkDoc.data().items) {
@@ -94,10 +96,9 @@ document.addEventListener('alpine:init', () => {
             if (meta.notesDiscrepancies) this.notesDiscrepancies = meta.notesDiscrepancies;
             this.cloudConnected = true;
           } catch (err) {
-            console.error("Gagal memuat turun data serpihan:", err);
+            console.error("Gagal memuat turun data serpihan awan:", err);
           }
         } else {
-          // Sekiranya awan masih kosong, muat naik data sedia ada
           if (this.phones.length > 0) {
             this.saveData();
           }
@@ -112,11 +113,9 @@ document.addEventListener('alpine:init', () => {
     },
 
     async saveData() {
-      // 1. Simpan salinan ke storan setempat pelayar (offline fallback)
       localStorage.setItem('ppm_phones', JSON.stringify(this.phones));
       localStorage.setItem('ppm_categories', JSON.stringify(this.categories));
 
-      // 2. Simpan ke Cloud Firestore dengan pecahan 400 aset per dokumen
       if (!db) return;
       this.isSyncing = true;
 
@@ -131,7 +130,6 @@ document.addEventListener('alpine:init', () => {
           batch.set(chunkRef, { items: chunkItems });
         }
 
-        // Kemas kini dokumen meta
         const metaRef = db.collection('ppm_system').doc('meta');
         batch.set(metaRef, {
           totalAssets: this.phones.length,
@@ -323,6 +321,9 @@ document.addEventListener('alpine:init', () => {
       return pages.length ? pages : [[]];
     },
 
+    // =========================================================================
+    // IMPORT EXCEL MULTI-FORMAT (Book1, Book2, Book3, Progress CCTV/ACS, Phone)
+    // =========================================================================
     handleFileUpload(event) {
       const file = event.target.files[0];
       if (!file) return;
@@ -336,6 +337,7 @@ document.addEventListener('alpine:init', () => {
           let addedCount = 0;
           let updatedCount = 0;
 
+          // Pemetaan berdasarkan Tag ID untuk mengemas kini atau menambah data
           const assetMap = new Map();
           this.phones.forEach(item => {
             if (item.tag) {
@@ -353,6 +355,7 @@ document.addEventListener('alpine:init', () => {
             for (let i = 0; i < Math.min(rawRows.length, 35); i++) {
               const rowStr = rawRows[i].map(c => String(c).trim().toLowerCase()).join(' ');
               if (
+                rowStr.includes('asset name') ||
                 rowStr.includes('new id') || 
                 rowStr.includes('previous id') || 
                 rowStr.includes('asset id') || 
@@ -376,21 +379,35 @@ document.addEventListener('alpine:init', () => {
                   if (head) row[head] = rowData[colIdx] !== undefined ? String(rowData[colIdx]).trim() : '';
                 });
 
-                const rawTag = row['new id'] || row['previous id'] || row['asset id'] || row['their asset tagging'] || row['asset tag'] || row['tag'];
+                if (String(row['unnamed: 0'] || '').toUpperCase() === 'SAMPLE') continue;
+
+                const rawTag = row['asset name'] || row['new id'] || row['previous id'] || row['asset id'] || row['their asset tagging'] || row['asset tag'] || row['tag'];
                 if (!rawTag || String(rawTag).trim().length < 2) continue;
 
                 const tag = String(rawTag).trim();
-                const level = row['level'] || 'GF';
-                const location = row['location'] || row['location on them'] || 'Unspecified';
+
+                let level = row['level'] || row['floor'] || row['level / floor'] || 'GF';
+                let location = row['location'] || row['device location'] || row['location name'] || 'Unspecified';
+
+                // Ekstrak Aras dan Lokasi daripada format kod Area (cth: RTS-ICQ-LG-DRIVEWAY-C-0602)
+                if (row['area'] && row['area'].includes('RTS-ICQ-')) {
+                  const parts = row['area'].split('-');
+                  if (parts.length >= 4) {
+                    level = parts[2];
+                    location = parts.slice(3, parts.length - 2).join('-') || parts[3];
+                  }
+                }
+
                 const ip = row['ip address'] || row['ip'] || '';
 
-                let category = 'Access Control';
+                // Pengesanan Kategori
+                let category = 'CCTV Camera';
                 const upperSheet = sheetName.toUpperCase();
                 const upperTag = tag.toUpperCase();
 
                 if (upperSheet.includes('CCTV') || upperTag.includes('CTV') || upperTag.includes('CAM')) {
                   category = 'CCTV Camera';
-                } else if (upperSheet.includes('ACS') || upperTag.includes('ACS')) {
+                } else if (upperSheet.includes('ACS') || upperSheet.includes('ELV-000002') || upperTag.includes('ACS')) {
                   category = 'Access Control';
                 } else if (upperTag.includes('TEL')) {
                   category = 'IP Phone';
@@ -402,11 +419,11 @@ document.addEventListener('alpine:init', () => {
                 let desc = '-';
 
                 if (category === 'CCTV Camera') {
-                  model = row['device model'] || '-';
-                  desc = row['type'] || row['device type'] || 'DOME';
+                  model = row['asset model '] || row['asset model'] || row['device model'] || '-';
+                  desc = row['asset description'] || row['asset type description'] || row['type'] || row['device type'] || '5MP Camera';
                 } else if (category === 'Access Control') {
-                  model = row['device model'] || 'Access Door';
-                  desc = row['device model'] || 'Access Door';
+                  model = row['serial no'] || row['device model'] || row['model'] || 'Access Door';
+                  desc = row['asset type description'] || row['device type'] || row['device description'] || 'Access Door';
                 } else {
                   model = row['device model'] || row['phone model'] || row['model'] || '-';
                   desc = row['description'] || 'IP PHONE';
@@ -417,52 +434,49 @@ document.addEventListener('alpine:init', () => {
                 }
 
                 const assetKey = tag.toUpperCase();
-                const newAssetData = {
-                  tag: tag,
-                  category: category,
-                  level: String(level).trim(),
-                  location: String(location).trim(),
-                  model: String(model).trim(),
-                  desc: String(desc).trim(),
-                  ip: String(ip).trim(),
-
-                  cctvPhysical: '',
-                  picQuality: '',
-                  viewFocus: '',
-                  recording: '',
-                  playback: '',
-                  ptzVolt: '',
-                  ptzPattern: '',
-
-                  magLock: '',
-                  readerIn: '',
-                  readerOut: '',
-                  pushBtn: '',
-                  breakGlass: '',
-                  doorSensor: '',
-                  keySwitch: '',
-
-                  physicalCheck: '',
-                  callIn: '',
-                  callOut: '',
-
-                  remarks: ''
-                };
 
                 if (assetMap.has(assetKey)) {
                   const existing = assetMap.get(assetKey);
-                  Object.assign(existing, {
-                    tag: newAssetData.tag,
-                    category: newAssetData.category,
-                    level: newAssetData.level,
-                    location: newAssetData.location,
-                    model: newAssetData.model,
-                    desc: newAssetData.desc,
-                    ip: newAssetData.ip,
-                    remarks: ''
-                  });
+                  // Kekalkan nilai sedia ada jika data baharu kosong (cth: mengekalkan IP sedia ada)
+                  existing.category = category;
+                  if (level && level !== 'GF') existing.level = String(level).trim();
+                  if (location && location !== 'Unspecified') existing.location = String(location).trim();
+                  if (model && model !== '-') existing.model = String(model).trim();
+                  if (desc && desc !== '-') existing.desc = String(desc).trim();
+                  if (ip) existing.ip = String(ip).trim();
                   updatedCount++;
                 } else {
+                  const newAssetData = {
+                    tag: tag,
+                    category: category,
+                    level: String(level).trim(),
+                    location: String(location).trim(),
+                    model: String(model).trim(),
+                    desc: String(desc).trim(),
+                    ip: String(ip).trim(),
+
+                    cctvPhysical: '',
+                    picQuality: '',
+                    viewFocus: '',
+                    recording: '',
+                    playback: '',
+                    ptzVolt: '',
+                    ptzPattern: '',
+
+                    magLock: '',
+                    readerIn: '',
+                    readerOut: '',
+                    pushBtn: '',
+                    breakGlass: '',
+                    doorSensor: '',
+                    keySwitch: '',
+
+                    physicalCheck: '',
+                    callIn: '',
+                    callOut: '',
+
+                    remarks: ''
+                  };
                   assetMap.set(assetKey, newAssetData);
                   addedCount++;
                 }
@@ -478,7 +492,7 @@ document.addEventListener('alpine:init', () => {
           this.phones = Array.from(assetMap.values());
           this.saveData();
 
-          alert(`Berjaya memproses fail!\n• Tab Diproses: ${workbook.SheetNames.join(', ')}\n• Ditambah: ${addedCount} unit\n• Dikemaskini: ${updatedCount} unit\n• Disimpan ke Cloud Firestore.`);
+          alert(`Berjaya memproses fail!\n• Tab Diproses: ${workbook.SheetNames.join(', ')}\n• Ditambah: ${addedCount} unit\n• Dikemaskini: ${updatedCount} unit\n• Jumlah Aset Semasa: ${this.phones.length}`);
           event.target.value = '';
         } catch (err) {
           console.error(err);
@@ -499,6 +513,9 @@ document.addEventListener('alpine:init', () => {
       window.print();
     },
 
+    // =========================================================================
+    // JANA DOKUMEN WORD (.DOCX) LANDSCAPE
+    // =========================================================================
     async downloadDocxChecklist() {
       if (typeof docx === 'undefined') {
         alert('Library docx sedang dimuatkan.');
@@ -576,7 +593,7 @@ document.addEventListener('alpine:init', () => {
         if (isCCTV) {
           cells = [
             String(idx + 1), ph.tag || "", ph.level || "", ph.location || "",
-            ph.desc || "DOME", ph.ip || "",
+            ph.desc || ph.model || "5MP Dome", ph.ip || "",
             ph.cctvPhysical || "", ph.picQuality || "", ph.viewFocus || "",
             ph.recording || "", ph.playback || "", ph.ptzVolt || "",
             ph.ptzPattern || "", ""
