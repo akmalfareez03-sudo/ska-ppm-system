@@ -1,32 +1,36 @@
-* {
-  -webkit-tap-highlight-color: transparent;
-  box-sizing: border-box;
+/* =========================================================================
+   PERBAIKAN FOUC (FLASH OF UNSTYLED CONTENT)
+   Menyembunyikan elemen sebelum Alpine.js selesai dimuatkan
+   ========================================================================= */
+[x-cloak] {
+  display: none !important;
+}
+
+/* =========================================================================
+   GAYA ASAS & PRINT LANDSCAPE A4
+   ========================================================================= */
+@page {
+  size: A4 landscape;
+  margin: 8mm 6mm 8mm 6mm;
 }
 
 body {
-  font-family: Arial, Helvetica, sans-serif;
-  color: #000;
-  margin: 0;
-  padding: 0;
-  background-color: #cbd5e1;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #1e293b;
 }
 
-input, select, textarea {
-  font-size: 13px;
-  font-family: inherit;
-}
-
+/* Header Kotak Rasmi SKA */
 .ska-header-box {
-  border: 1px dashed #777;
-  padding: 6px 14px;
-  background-color: #fff;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
+  border: 1px dashed #64748b;
+  padding: 6px 12px;
+  margin-bottom: 12px;
+  background-color: #ffffff;
 }
 
+/* Jadual Rasmi PPM Checklist */
 .official-table {
   width: 100%;
   border-collapse: collapse;
@@ -34,61 +38,48 @@ input, select, textarea {
 }
 
 .official-table th {
-  background-color: #009be3 !important;
-  color: #000 !important;
-  font-weight: bold;
-  border: 1px solid #000 !important;
-  padding: 5px 3px;
+  background-color: #009be3;
+  color: #000000;
+  font-weight: 700;
   text-align: center;
-  vertical-align: middle;
+  border: 1px solid #000000;
+  padding: 5px 3px;
+  line-height: 1.15;
 }
 
 .official-table td {
-  border: 1px solid #000 !important;
-  padding: 3px 6px;
-  vertical-align: middle;
-  background-color: #dcf2fd;
+  border: 1px solid #000000;
+  padding: 4px 4px;
+  line-height: 1.15;
 }
 
-.official-table tr:nth-child(even) td {
+/* Warna belang selang-seli baris data */
+.official-table tbody tr:nth-child(even) {
   background-color: #ecf7fe;
 }
 
+.official-table tbody tr:nth-child(odd) {
+  background-color: #dcf2fd;
+}
+
+/* Jadual Footer Rasmi */
 .official-footer-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 10px;
   margin-top: 10px;
-  background-color: #fff;
+  font-size: 10px;
 }
 
 .official-footer-table td {
-  border: 1px solid #000 !important;
+  border: 1px solid #000000;
   padding: 4px 6px;
-  vertical-align: middle;
-  color: #111;
+  background-color: #ffffff;
 }
 
-.page-container {
-  width: 100%;
-  max-width: 1100px;
-  margin: 0 auto 24px auto;
-  min-height: 720px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-@page {
-  size: A4 landscape;
-  margin: 10mm 12mm;
-}
-
+/* Tetapan Cetakan */
 @media print {
-  html, body {
-    width: 100% !important;
-    height: 100% !important;
-    background: #fff !important;
+  body {
+    background-color: #ffffff !important;
     padding: 0 !important;
     margin: 0 !important;
   }
@@ -98,50 +89,20 @@ input, select, textarea {
   }
 
   .page-container {
-    width: 100% !important;
-    max-width: 100% !important;
-    height: 100vh !important;
-    min-height: 100vh !important;
-    page-break-after: always !important;
-    page-break-inside: avoid !important;
-    display: flex !important;
-    flex-direction: column !important;
-    justify-content: space-between !important;
-    padding: 0 !important;
-    margin: 0 !important;
+    page-break-after: always;
     box-shadow: none !important;
     border-radius: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
   }
 
   .page-container:last-child {
-    page-break-after: auto !important;
+    page-break-after: auto;
   }
 
-  .ska-header-box {
-    border: 1px dashed #333 !important;
-  }
-
-  .official-table th {
-    background-color: #009be3 !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-
-  .official-table td {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-
-  select {
-    appearance: none !important;
-    -webkit-appearance: none !important;
-    -moz-appearance: none !important;
-    border: none !important;
-    background: transparent !important;
-  }
-
-  input, textarea {
-    border: none !important;
-    background: transparent !important;
+  /* Elakkan baris jadual terpotong antara muka surat */
+  tr {
+    page-break-inside: avoid;
   }
 }
