@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PPM Maintenance Management System</title>
+
+  <!-- External CDNs -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+  <!-- Firebase App & Firestore Compat SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="p-2 md:p-6" x-data="ppmApp">
+
+  <!-- ==================== TOP NAVIGATION BAR ==================== -->
+  <header class="max-w-[1100px] mx-auto mb-6 bg-slate-900 text-white p-4 rounded-xl shadow no-print">
+    <div class="flex flex-wrap justify-between items-center gap-3 pb-3 border-b border-slate-700">
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-base font-bold tracking-wide">PPM Maintenance Portal (SKA ICQC)</h1>
+          <span :class="isSyncing ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : (cloudConnected ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-red-500/20 text-red-300 border-red-500/40')" 
+                class="text-[10px] px-2 py-0.5 rounded-full border font-mono flex items-center gap-1">
+            <span class="inline-block w-1.5 h-1.5 rounded-full" :class="isSyncing ? 'bg-amber-400 animate-pulse' : (cloudConnected ? 'bg-emerald-400' : 'bg-red-400')"></span>
+            <span x-text="isSyncing ? 'Menyelaras...' : (cloudConnected ? 'Awan Aktif' : 'Luar Talian')"></span>
+          </span>
+        </div>
+        <p class="text-xs text-slate-400">Pengurusan Aset & Laporan Penyelenggaraan Pencegahan (Diselaraskan Melalui Awan)</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button @click="printChecklist" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow flex items-center gap-1.5 transition">
+          🖨️ Cetak / Simpan PDF
+        </button>
+        <button @click="downloadDocxChecklist" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow flex items-center gap-1.5 transition">
+          📥 Muat Turun Word (.docx)
+        </button>
+      </div>
+    </div>
+
+    <nav class="flex flex-wrap gap-2 pt-3">
+      <button @click="currentView = 'main'" 
+        :class="currentView === 'main' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'"
+        class="px-4 py-1.5 rounded-lg text-xs font-semibold transition">
+        🔍 1. Carian Aset & Pendaftaran
+      </button>
+
+      <button @click="currentView = 'category_list'" 
+        :class="currentView === 'category_list' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'"
+        class="px-4 py-1.5 rounded-lg text-xs font-semibold transition">
+        📂 2. Senarai Aset Mengikut Kategori (<span x-text="phones.length"></span>)
+      </button>
+
+      <button @click="currentView = 'checklist'" 
+        :class="currentView === 'checklist' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'"
+        class="px-4 py-1.5 rounded-lg text-xs font-semibold transition">
+        📄 3. Pratonton Borang & Laporan Rasmi (Landscape)
+      </button>
+    </nav>
+  </header>
+
+  <!-- =========================================================================
+       HALAMAN 1: MAIN PAGE (SEARCH BAR & DAFTAR ASET / TAMBAH KATEGORI)
+       ========================================================================= -->
+  <section x-show="currentView === 'main'" class="max-w-[1100px] mx-auto space-y-6 no-print">
+
+    <!-- KOTAK CARIAN PANTAS ASET -->
+    <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-bold text-slate-900 uppercase tracking-wide flex items-center gap-2">
+          <span>🔎</span> Carian Pantas Maklumat Aset
+        </h2>
+        <span class="text-xs text-slate-500 font-mono" x-text="'Jumlah Data: ' + phones.length + ' Item'"></span>
+      </div>
+
+      <div class="relative">
+        <input type="text" x-model="searchQuery" placeholder="Cari Asset Tag (cth: RTS-LG-CTV-0001, RTS-LG-ACS-0001), Lokasi, atau IP..." 
+          class="w-full px-4 py-3 pl-10 border-2 border-slate-200 rounded-xl text-sm focus:border-indigo-600 focus:ring-0 outline-none transition">
+        <span class="absolute left-3.5 top-3.5 text-slate-400">🔍</span>
+      </div>
+
+      <div x-show="searchQuery.trim().length > 0" class="mt-4 pt-4 border-t border-slate-100 space-y-3">
+        <p class="text-xs font-semibold text-slate-500">
+          Dijumpai: <span class="text-indigo-600" x-text="searchResults.length"></span> peranti sepadan
+        </p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto">
+          <template x-for="(res, idx) in searchResults" :key="idx">
+            <div class="p-4 border border-indigo-100 bg-indigo-50/30 rounded-xl space-y-2">
+              <div class="flex justify-between items-start">
+                <div>
+                  <span class="text-xs font-bold font-mono text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200" x-text="res.tag"></span>
+                  <h3 class="text-sm font-bold text-slate-900 mt-1" x-text="res.location"></h3>
+                </div>
+                <span class="text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-semibold" x-text="res.category"></span>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2 text-xs pt-1 text-slate-600">
+                <div><strong>Aras (Level):</strong> <span x-text="res.level"></span></div>
+                <div><strong>Model / Jenis:</strong> <span x-text="res.model || res.desc || '-'"></span></div>
+                <div><strong>IP Address:</strong> <span class="font-mono text-slate-800" x-text="res.ip || '-'"></span></div>
+                <div><strong>Status Semakan:</strong> <span class="font-bold text-indigo-600">Tersimpan</span></div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- BORANG DAFTAR ASET -->
+    <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200 space-y-4">
+      <div class="flex flex-wrap justify-between items-center gap-2">
+        <h2 class="text-sm font-bold text-slate-900 uppercase tracking-wide flex items-center gap-2">
+          <span>➕</span> Daftar Aset Baharu (Satu Demi Satu)
+        </h2>
+
+        <div class="flex items-center gap-2">
+          <input type="text" x-model="newCategoryName" placeholder="Nama Kategori Baharu..." class="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg outline-none focus:border-indigo-500">
+          <button @click="addNewCategory" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg shadow transition">
+            + Kategori
+          </button>
+        </div>
+      </div>
+
+      <form @submit.prevent="addSingleAsset" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Kategori Aset</label>
+          <select x-model="newAsset.category" class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+            <template x-for="cat in categories" :key="cat">
+              <option :value="cat" x-text="cat"></option>
+            </template>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Asset Tag / ID</label>
+          <input type="text" x-model="newAsset.tag" placeholder="cth: RTS-LG-CTV-0001 / RTS-LG-ACS-0001" required
+            class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Model / Jenama</label>
+          <input type="text" x-model="newAsset.model" placeholder="cth: ISV-B05M023S-N / TS-300F"
+            class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Aras / Level</label>
+          <input type="text" x-model="newAsset.level" placeholder="cth: LG, GF, L1, L2, L3"
+            class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Lokasi Perkakasan</label>
+          <input type="text" x-model="newAsset.location" placeholder="cth: EXTERNAL DRIVEWAY"
+            class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Alamat IP</label>
+          <input type="text" x-model="newAsset.ip" placeholder="cth: 10.188.16.2"
+            class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Jenis / Penerangan</label>
+          <input type="text" x-model="newAsset.desc" placeholder="cth: BULLET / DOME / PTZ"
+            class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+        </div>
+
+        <div class="flex items-end">
+          <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg text-xs shadow transition">
+            + Simpan Aset
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- IMPORT EXCEL -->
+    <div class="bg-white p-5 rounded-xl shadow-md border border-slate-200 flex flex-wrap justify-between items-center gap-4">
+      <div>
+        <h3 class="text-xs font-bold uppercase text-slate-800">Muat Naik Pukal Excel (Batch Import)</h3>
+        <p class="text-xs text-slate-500">Menyokong fail <code>EAC CCTV IP Address System Progress.xlsx</code> dan <code>Phone SKA detail.xlsx</code> terus.</p>
+      </div>
+      <label class="cursor-pointer bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow">
+        📁 Pilih Fail Excel
+        <input type="file" accept=".xlsx, .xls" class="hidden" @change="handleFileUpload($event)">
+      </label>
+    </div>
+
+  </section>
+
+  <!-- =========================================================================
+       HALAMAN 2: SENARAI ASET MENGIKUT KATEGORI
+       ========================================================================= -->
+  <section x-show="currentView === 'category_list'" class="max-w-[1100px] mx-auto space-y-4 no-print">
+    
+    <div class="bg-white p-4 rounded-xl shadow-md border border-slate-200">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="text-xs font-bold uppercase text-slate-700">Tapis Kategori Peranti:</h3>
+        <button x-show="phones.length > 0" @click="clearAll" class="text-xs text-red-500 hover:underline">Padam Semua Rekod</button>
+      </div>
+
+      <div class="flex flex-wrap gap-2">
+        <button @click="selectedCategoryTab = 'All'" 
+          :class="selectedCategoryTab === 'All' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'"
+          class="px-3 py-1.5 rounded-lg text-xs font-semibold transition">
+          Semua Aset (<span x-text="phones.length"></span>)
+        </button>
+
+        <template x-for="cat in categories" :key="cat">
+          <button @click="selectedCategoryTab = cat" 
+            :class="selectedCategoryTab === cat ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold transition">
+            <span x-text="cat"></span> (<span x-text="countByCategory(cat)"></span>)
+          </button>
+        </template>
+      </div>
+    </div>
+
+    <div class="bg-white p-5 rounded-xl shadow-md border border-slate-200">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="bg-slate-100 text-slate-700 border-b">
+              <th class="p-2">No</th>
+              <th class="p-2">Asset Tag</th>
+              <th class="p-2">Kategori</th>
+              <th class="p-2">Model / Jenis</th>
+              <th class="p-2">Aras</th>
+              <th class="p-2">Lokasi</th>
+              <th class="p-2">Alamat IP</th>
+              <th class="p-2 text-center">Tindakan</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <template x-for="(item, idx) in filteredAssetsByCategory" :key="idx">
+              <tr class="hover:bg-slate-50">
+                <td class="p-2 font-mono" x-text="idx + 1"></td>
+                <td class="p-2 font-bold font-mono text-indigo-700" x-text="item.tag"></td>
+                <td class="p-2"><span class="px-2 py-0.5 rounded bg-slate-200 text-[10px]" x-text="item.category"></span></td>
+                <td class="p-2 font-mono" x-text="item.category === 'CCTV Camera' ? (item.desc + ' (' + item.model + ')') : item.model"></td>
+                <td class="p-2 font-semibold" x-text="item.level"></td>
+                <td class="p-2 text-slate-600" x-text="item.location"></td>
+                <td class="p-2 font-mono text-slate-500" x-text="item.ip"></td>
+                <td class="p-2 text-center">
+                  <button @click="deleteAsset(idx)" class="text-red-500 hover:text-red-700 font-semibold text-[11px]">Padam</button>
+                </td>
+              </tr>
+            </template>
+            <tr x-show="filteredAssetsByCategory.length === 0">
+              <td colspan="8" class="text-center py-6 text-slate-400">Tiada aset dalam kategori ini.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- =========================================================================
+       HALAMAN 3: BORANG CETAKAN DOKUMEN RASMI
+       ========================================================================= -->
+  <main :class="currentView === 'checklist' ? 'block' : 'hidden print:block'" class="max-w-[1100px] mx-auto space-y-8 print:space-y-0">
+
+    <!-- Kawalan Format (CCTV / ACS / Phone) & Butang Pantas Pukal -->
+    <div class="bg-white p-3 rounded-xl border border-slate-200 flex flex-wrap justify-between items-center gap-3 no-print">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs font-bold uppercase text-slate-700">Pilih Format:</span>
+        <button @click="selectedReportType = 'CCTV'; footerTitle = 'Maintenance Checklist / CCTV'" 
+          :class="selectedReportType === 'CCTV' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 text-slate-700'"
+          class="px-3 py-1 rounded-lg text-xs font-semibold transition">
+          📹 CCTV System
+        </button>
+        <button @click="selectedReportType = 'ACS'; footerTitle = 'Maintenance Checklist / ACS'" 
+          :class="selectedReportType === 'ACS' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 text-slate-700'"
+          class="px-3 py-1 rounded-lg text-xs font-semibold transition">
+          🔐 Electronic Access Card (ACS)
+        </button>
+        <button @click="selectedReportType = 'IP Phone'; footerTitle = 'Maintenance Checklist / Phone'" 
+          :class="selectedReportType === 'IP Phone' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 text-slate-700'"
+          class="px-3 py-1 rounded-lg text-xs font-semibold transition">
+          ☎️ IP Phone / PABX
+        </button>
+      </div>
+
+      <!-- Butang Pukal Mengosongkan Checklist untuk Tulis Tangan -->
+      <div class="flex items-center gap-2">
+        <button @click="clearAllChecklistsBulk()" class="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-semibold px-3 py-1 rounded-lg shadow-sm">
+          ✍️ Kosongkan Semua Checklist (Pukal)
+        </button>
+        <button @click="setAllChecklistsBulkOK()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-semibold px-3 py-1 rounded-lg shadow-sm">
+          Set Semua OK
+        </button>
+      </div>
+    </div>
+
+    <template x-for="(pageRows, pageIdx) in phonePages" :key="pageIdx">
+      <div class="page-container bg-white p-6 md:p-8 shadow-lg rounded-xl">
+        <div>
+          <!-- Pengepala Rasmi SKA -->
+          <div class="ska-header-box">
+            <div class="w-28 flex-shrink-0 text-center">
+              <img src="logo_ska.png" alt="SKA Logo" class="h-14 mx-auto object-contain">
+            </div>
+            <div class="flex-1 text-center px-2">
+              <h2 class="font-bold text-xs tracking-wide text-slate-900">SKA TECHNOLOGY SDN. BHD. <span class="font-normal">(552680-M)</span></h2>
+              <p class="text-[9px] text-slate-600 leading-tight">No. 26, Jalan Siput Akek, Taman Billion, Cheras, 56000 Kuala Lumpur</p>
+              <div class="text-[9px] text-slate-600 flex justify-center gap-6 mt-0.5">
+                <span><strong>Tel:</strong> 603-9130 5371, 9131 5371</span>
+                <span><strong>Fax:</strong> 603-91305372</span>
+              </div>
+              <div class="text-[9px] text-slate-600 flex justify-center gap-6">
+                <span><strong>Email:</strong> skatech@skatech.com.my</span>
+                <span><strong>Website:</strong> www.skatech.com.my</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0 border-l border-dashed border-slate-400 pl-3">
+              <img src="logo_mrts.png" alt="MRTS Logo" class="h-10 object-contain">
+              <img src="logo_ijm.png" alt="IJM Logo" class="h-10 object-contain">
+            </div>
+          </div>
+
+          <!-- Tajuk Dokumen Rasmi -->
+          <div class="text-center mb-3">
+            <h2 class="text-xs md:text-sm font-bold uppercase tracking-wider">PREVENTIVE MAINTENANCE: <span x-text="projectName"></span></h2>
+            <h3 class="text-[11px] md:text-xs font-semibold uppercase mt-0.5">MAINTENANCE CHECKLIST (<span x-text="monthYear"></span>)</h3>
+            <h4 class="text-[11px] font-bold uppercase mt-0.5 text-slate-700" 
+                x-text="selectedReportType === 'CCTV' ? 'CCTV SYSTEM (INTERNAL BUILDING)' : (selectedReportType === 'ACS' ? 'ELECTRONIC ACCESS CARD SYSTEM' : 'IP PABX SYSTEM & IP PHONE')">
+            </h4>
+          </div>
+
+          <!-- ==============================================================
+               JADUAL FORMAT CCTV SYSTEM (14 LAJUR RASMI)
+               ============================================================== -->
+          <div class="mb-2" x-show="selectedReportType === 'CCTV'">
+            <table class="official-table">
+              <thead>
+                <tr>
+                  <th style="width: 2.5%;">NO</th>
+                  <th style="width: 12%;">ASSET ID</th>
+                  <th style="width: 4%;">LEVEL</th>
+                  <th style="width: 14%;">LOCATION</th>
+                  <th style="width: 8%;">DEVICE TYPE</th>
+                  <th style="width: 9.5%;">IP ADDRESS</th>
+                  <th style="width: 6.5%;">PYSICAL CHECK</th>
+                  <th style="width: 6.5%;">PICTURE QUALITY</th>
+                  <th style="width: 7%;">CAMERA VIEW FOCUS</th>
+                  <th style="width: 6.5%;">RECORDING</th>
+                  <th style="width: 6.5%;">PLAYBACK</th>
+                  <th style="width: 5.5%;">PTZ VOLTAGE</th>
+                  <th style="width: 6%;">PTZ PRESET & PATTERN</th>
+                  <th style="width: 7%;">REMARKS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(ph, rowIdx) in pageRows" :key="rowIdx">
+                  <tr>
+                    <td class="text-center font-bold" x-text="pageIdx * 20 + rowIdx + 1"></td>
+                    <td class="font-bold font-mono text-slate-900" x-text="ph.tag"></td>
+                    <td class="text-center font-semibold" x-text="ph.level"></td>
+                    <td x-text="ph.location"></td>
+                    <td class="font-mono text-center text-[10px]" x-text="ph.desc"></td>
+                    <td class="font-mono text-[10px]" x-text="ph.ip"></td>
+
+                    <!-- Physical Check -->
+                    <td class="text-center">
+                      <select x-model="ph.cctvPhysical" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <!-- Picture Quality -->
+                    <td class="text-center">
+                      <select x-model="ph.picQuality" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <!-- Camera View Focus -->
+                    <td class="text-center">
+                      <select x-model="ph.viewFocus" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <!-- Recording -->
+                    <td class="text-center">
+                      <select x-model="ph.recording" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <!-- Playback -->
+                    <td class="text-center">
+                      <select x-model="ph.playback" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <!-- PTZ Voltage -->
+                    <td class="text-center">
+                      <select x-model="ph.ptzVolt" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <!-- PTZ Preset & Pattern -->
+                    <td class="text-center">
+                      <select x-model="ph.ptzPattern" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <td>
+                      <input type="text" x-model="ph.remarks" @change="saveData()" class="w-full bg-transparent text-[10px] outline-none">
+                    </td>
+                  </tr>
+                </template>
+                <tr x-show="pageRows.length === 0">
+                  <td colspan="14" class="text-center py-6 text-slate-500 font-semibold">
+                    Tiada data CCTV. Sila muat naik fail Excel atau daftarkan kamera di Tab 1.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- ==============================================================
+               JADUAL FORMAT ACS (12 LAJUR RASMI)
+               ============================================================== -->
+          <div class="mb-2" x-show="selectedReportType === 'ACS'">
+            <table class="official-table">
+              <thead>
+                <tr>
+                  <th style="width: 3%;">NO</th>
+                  <th style="width: 13%;">ASSET ID</th>
+                  <th style="width: 18%;">LOCATION</th>
+                  <th style="width: 4%;">LEVEL</th>
+                  <th style="width: 7%;">MAGNETIC LOCK</th>
+                  <th style="width: 7%;">READER (IN)</th>
+                  <th style="width: 7%;">READER (OUT)</th>
+                  <th style="width: 8%;">EXIT PUSH BUTTON</th>
+                  <th style="width: 7%;">BREAK GLASS</th>
+                  <th style="width: 7%;">DOOR SENSOR</th>
+                  <th style="width: 6%;">KEY SWITCH</th>
+                  <th style="width: 13%;">REMARKS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(ph, rowIdx) in pageRows" :key="rowIdx">
+                  <tr>
+                    <td class="text-center font-bold" x-text="pageIdx * 20 + rowIdx + 1"></td>
+                    <td class="font-bold font-mono text-slate-900" x-text="ph.tag"></td>
+                    <td x-text="ph.location"></td>
+                    <td class="text-center font-semibold" x-text="ph.level"></td>
+
+                    <td class="text-center">
+                      <select x-model="ph.magLock" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <td class="text-center">
+                      <select x-model="ph.readerIn" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <td class="text-center">
+                      <select x-model="ph.readerOut" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <td class="text-center">
+                      <select x-model="ph.pushBtn" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <td class="text-center">
+                      <select x-model="ph.breakGlass" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <td class="text-center">
+                      <select x-model="ph.doorSensor" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <td class="text-center">
+                      <select x-model="ph.keySwitch" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <td>
+                      <input type="text" x-model="ph.remarks" @change="saveData()" class="w-full bg-transparent text-[10px] outline-none">
+                    </td>
+                  </tr>
+                </template>
+                <tr x-show="pageRows.length === 0">
+                  <td colspan="12" class="text-center py-6 text-slate-500 font-semibold">
+                    Tiada data Access Control. Sila muat naik fail Excel atau daftarkan peranti di Tab 1.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- ==============================================================
+               JADUAL FORMAT IP PHONE / PABX (11 LAJUR RASMI)
+               ============================================================== -->
+          <div class="mb-2" x-show="selectedReportType === 'IP Phone'">
+            <table class="official-table">
+              <thead>
+                <tr>
+                  <th style="width: 3%;">NO</th>
+                  <th style="width: 14%;">ASSET ID</th>
+                  <th style="width: 4%;">LEVEL</th>
+                  <th style="width: 20%;">LOCATION</th>
+                  <th style="width: 9%;">MODEL</th>
+                  <th style="width: 11%;">DESCRIPTION</th>
+                  <th style="width: 11%;">IP ADDRESS</th>
+                  <th style="width: 7%;">PHYSICAL CHECK</th>
+                  <th style="width: 6%;">CALL IN</th>
+                  <th style="width: 6%;">CALL OUT</th>
+                  <th style="width: 9%;">REMARKS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(ph, rowIdx) in pageRows" :key="rowIdx">
+                  <tr>
+                    <td class="text-center font-bold" x-text="pageIdx * 20 + rowIdx + 1"></td>
+                    <td class="font-bold font-mono text-slate-900" x-text="ph.tag"></td>
+                    <td class="text-center font-semibold" x-text="ph.level"></td>
+                    <td x-text="ph.location"></td>
+                    <td class="font-mono text-center" x-text="ph.model"></td>
+                    <td class="font-mono text-slate-700" x-text="ph.desc"></td>
+                    <td class="font-mono" x-text="ph.ip"></td>
+
+                    <td class="text-center">
+                      <select x-model="ph.physicalCheck" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <td class="text-center">
+                      <select x-model="ph.callIn" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <td class="text-center">
+                      <select x-model="ph.callOut" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer">
+                        <option value=""></option>
+                        <option value="OK">OK</option>
+                        <option value="NO">NO</option>
+                        <option value="N/A">N/A</option>
+                      </select>
+                    </td>
+
+                    <td>
+                      <input type="text" x-model="ph.remarks" @change="saveData()" class="w-full bg-transparent text-[11px] outline-none">
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Ruangan Catatan (Halaman Terakhir Sahaja) -->
+          <template x-if="pageIdx === phonePages.length - 1">
+            <div class="mt-2 mb-1">
+              <label class="block text-[10px] font-bold uppercase text-slate-800">NOTES AND DISCREPANCIES:</label>
+              <textarea x-model="notesDiscrepancies" @change="saveData()" rows="2" class="w-full border border-slate-400 rounded p-1 text-[11px] text-slate-800 mt-0.5 outline-none"></textarea>
+            </div>
+          </template>
+        </div>
+
+        <!-- Footer Halaman Rasmi Berturutan -->
+        <table class="official-footer-table">
+          <tr>
+            <td style="width: 18%;" class="text-center font-bold text-[9px] leading-tight">
+              SKA Technology Sdn. Bhd.
+            </td>
+            <td style="width: 37%;" class="text-[9px]">
+              <div class="flex items-center gap-1">
+                <span class="font-semibold flex-shrink-0">Title:</span>
+                <input type="text" x-model="footerTitle" class="w-full bg-transparent font-medium italic outline-none border-b border-transparent hover:border-slate-300 focus:border-indigo-500">
+                <span class="font-semibold flex-shrink-0" x-text="'/ ' + monthYear"></span>
+              </div>
+            </td>
+            <td style="width: 33%;" class="text-[9px]">
+              Tested by (Signature & Name):
+            </td>
+            <td style="width: 12%;" class="text-[9px]">
+              Date: <span x-text="currentDate"></span>
+            </td>
+          </tr>
+          <tr>
+            <td class="text-center text-[9px] text-slate-600">
+              Project Reference:
+            </td>
+            <td class="text-[9px]">
+              <input type="text" x-model="footerProjectName" class="w-full bg-transparent font-bold uppercase outline-none border-b border-transparent hover:border-slate-300 focus:border-indigo-500">
+            </td>
+            <td class="text-[9px]">
+              Witness by (Signature & Name):
+            </td>
+            <td class="text-[9px] font-bold" x-text="'Page: ' + (pageIdx + 1)">
+            </td>
+          </tr>
+        </table>
+      </div>
+    </template>
+
+  </main>
+
+</body>
+</html>
