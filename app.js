@@ -56,6 +56,19 @@ document.addEventListener('alpine:init', () => {
       ip: ''
     },
 
+    // Modal Edit State
+    showEditModal: false,
+    editingOriginalTag: null,
+    editingAsset: {
+      tag: '',
+      category: '',
+      model: '',
+      level: '',
+      location: '',
+      desc: '',
+      ip: ''
+    },
+
     phones: JSON.parse(localStorage.getItem('ppm_phones') || '[]'),
     cloudConnected: false,
     isSyncing: false,
@@ -146,6 +159,58 @@ document.addEventListener('alpine:init', () => {
         this.cloudConnected = false;
       } finally {
         this.isSyncing = false;
+      }
+    },
+
+    // =========================================================================
+    // FUNGSI EDIT DETAIL ASET
+    // =========================================================================
+    openEditModal(item) {
+      this.editingOriginalTag = item.tag;
+      this.editingAsset = {
+        tag: item.tag || '',
+        category: item.category || 'CCTV Camera',
+        model: item.model || '',
+        level: item.level || '',
+        location: item.location || '',
+        desc: item.desc || '',
+        ip: item.ip || ''
+      };
+      this.showEditModal = true;
+    },
+
+    closeEditModal() {
+      this.showEditModal = false;
+      this.editingOriginalTag = null;
+    },
+
+    saveEditAsset() {
+      const idx = this.phones.findIndex(p => p.tag === this.editingOriginalTag);
+      if (idx !== -1) {
+        // Kemas kini medan aset tanpa mengusik rekod checklist semakan yang telah ditanda
+        this.phones[idx].tag = this.editingAsset.tag.trim();
+        this.phones[idx].category = this.editingAsset.category;
+        this.phones[idx].model = this.editingAsset.model.trim();
+        this.phones[idx].level = this.editingAsset.level.trim();
+        this.phones[idx].location = this.editingAsset.location.trim();
+        this.phones[idx].desc = this.editingAsset.desc.trim();
+        this.phones[idx].ip = this.editingAsset.ip.trim();
+
+        this.saveData();
+        this.closeEditModal();
+        alert('Maklumat aset berjaya dikemas kini!');
+      } else {
+        alert('Ralat: Aset tidak ditemui!');
+      }
+    },
+
+    deleteAssetByItem(item) {
+      if (confirm(`Padam aset "${item.tag}" daripada rekod?`)) {
+        const idx = this.phones.indexOf(item);
+        if (idx !== -1) {
+          this.phones.splice(idx, 1);
+          this.saveData();
+        }
       }
     },
 
@@ -258,6 +323,35 @@ document.addEventListener('alpine:init', () => {
       alert(`Kategori "${cat}" berjaya ditambah!`);
     },
 
+    deleteCategory(catName) {
+      const assetCount = this.countByCategory(catName);
+      let msg = `Padam kategori "${catName}"?`;
+      if (assetCount > 0) {
+        msg = `Amaran: Terdapat ${assetCount} aset di bawah kategori "${catName}". Jika dipadam, kategori aset tersebut akan ditukar kepada "Uncategorized". Teruskan?`;
+      }
+
+      if (confirm(msg)) {
+        if (assetCount > 0) {
+          this.phones.forEach(item => {
+            if (item.category === catName) {
+              item.category = 'Uncategorized';
+            }
+          });
+          if (!this.categories.includes('Uncategorized')) {
+            this.categories.push('Uncategorized');
+          }
+        }
+
+        this.categories = this.categories.filter(c => c !== catName);
+
+        if (this.selectedCategoryTab === catName) {
+          this.selectedCategoryTab = 'All';
+        }
+
+        this.saveData();
+      }
+    },
+
     addSingleAsset() {
       if (!this.newAsset.tag.trim()) {
         alert('Sila masukkan Asset ID / Tagging!');
@@ -304,13 +398,6 @@ document.addEventListener('alpine:init', () => {
       alert('Aset berjaya disimpan ke awan!');
     },
 
-    deleteAsset(index) {
-      if (confirm('Padam aset ini daripada rekod?')) {
-        this.phones.splice(index, 1);
-        this.saveData();
-      }
-    },
-
     get phonePages() {
       const pageSize = 20;
       const pages = [];
@@ -337,7 +424,6 @@ document.addEventListener('alpine:init', () => {
           let addedCount = 0;
           let updatedCount = 0;
 
-          // Pemetaan berdasarkan Tag ID untuk mengemas kini atau menambah data
           const assetMap = new Map();
           this.phones.forEach(item => {
             if (item.tag) {
@@ -389,7 +475,7 @@ document.addEventListener('alpine:init', () => {
                 let level = row['level'] || row['floor'] || row['level / floor'] || 'GF';
                 let location = row['location'] || row['device location'] || row['location name'] || 'Unspecified';
 
-                // Ekstrak Aras dan Lokasi daripada format kod Area (cth: RTS-ICQ-LG-DRIVEWAY-C-0602)
+                // Format kod Area (cth: RTS-ICQ-LG-DRIVEWAY-C-0602)
                 if (row['area'] && row['area'].includes('RTS-ICQ-')) {
                   const parts = row['area'].split('-');
                   if (parts.length >= 4) {
@@ -400,7 +486,6 @@ document.addEventListener('alpine:init', () => {
 
                 const ip = row['ip address'] || row['ip'] || '';
 
-                // Pengesanan Kategori
                 let category = 'CCTV Camera';
                 const upperSheet = sheetName.toUpperCase();
                 const upperTag = tag.toUpperCase();
@@ -437,7 +522,6 @@ document.addEventListener('alpine:init', () => {
 
                 if (assetMap.has(assetKey)) {
                   const existing = assetMap.get(assetKey);
-                  // Kekalkan nilai sedia ada jika data baharu kosong (cth: mengekalkan IP sedia ada)
                   existing.category = category;
                   if (level && level !== 'GF') existing.level = String(level).trim();
                   if (location && location !== 'Unspecified') existing.location = String(location).trim();
