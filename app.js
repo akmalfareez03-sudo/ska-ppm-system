@@ -1,5 +1,5 @@
 // =========================================================================
-// 1. KONFIGURASI FIREBASE CLOUD FIRESTORE
+// 1. KONFIGURASI FIREBASE CLOUD FIRESTORE & AUTHENTICATION
 // =========================================================================
 const firebaseConfig = {
   apiKey: "AIzaSyCUTwGoGfengsUkPO5a9mF-LYm2AwgR3-s",
@@ -12,9 +12,12 @@ const firebaseConfig = {
 };
 
 let db = null;
+let auth = null;
+
 try {
   firebase.initializeApp(firebaseConfig);
   db = firebase.firestore();
+  auth = firebase.auth();
 } catch (e) {
   console.warn("Ralat inisialisasi Firebase:", e);
 }
@@ -24,6 +27,14 @@ try {
 // =========================================================================
 document.addEventListener('alpine:init', () => {
   Alpine.data('ppmApp', () => ({
+    // Status Pengesahan Pengguna (Authentication)
+    currentUser: null,
+    authChecking: true,
+    loginEmail: '',
+    loginPassword: '',
+    loginError: '',
+    isLoggingIn: false,
+
     currentView: 'main', // 'main', 'category_list', 'checklist'
     selectedReportType: 'CCTV', // 'CCTV', 'ACS', atau 'IP Phone'
 
@@ -56,7 +67,6 @@ document.addEventListener('alpine:init', () => {
       ip: ''
     },
 
-    // Modal Edit State
     showEditModal: false,
     editingOriginalTag: null,
     editingAsset: {
@@ -74,14 +84,64 @@ document.addEventListener('alpine:init', () => {
     isSyncing: false,
 
     init() {
-      this.initCloudListener();
+      this.initAuthListener();
+    },
+
+    // =========================================================================
+    // PENGURUSAN LOG MASUK & SESI PENGGUNA (FIREBASE AUTH)
+    // =========================================================================
+    initAuthListener() {
+      if (!auth) {
+        this.authChecking = false;
+        return;
+      }
+
+      auth.onAuthStateChanged((user) => {
+        this.currentUser = user;
+        this.authChecking = false;
+
+        if (user) {
+          this.initCloudListener();
+        }
+      });
+    },
+
+    async loginUser() {
+      if (!auth) return;
+      this.loginError = '';
+      this.isLoggingIn = true;
+
+      try {
+        await auth.signInWithEmailAndPassword(this.loginEmail.trim(), this.loginPassword);
+        this.loginEmail = '';
+        this.loginPassword = '';
+      } catch (err) {
+        console.error("Ralat log masuk:", err);
+        if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+          this.loginError = 'E-mel atau kata laluan tidak sah.';
+        } else if (err.code === 'auth/too-many-requests') {
+          this.loginError = 'Terlalu banyak cubaan gagal. Sila cuba sebentar lagi.';
+        } else {
+          this.loginError = 'Gagal log masuk: ' + err.message;
+        }
+      } finally {
+        this.isLoggingIn = false;
+      }
+    },
+
+    async logoutUser() {
+      if (!auth) return;
+      if (confirm('Adakah anda pasti mahu log keluar dari sistem?')) {
+        await auth.signOut();
+        this.currentUser = null;
+      }
     },
 
     // =========================================================================
     // PENYELARASAN AWAN (CLOUD SYNC LISTENER - FIRESTORE)
     // =========================================================================
     initCloudListener() {
-      if (!db) return;
+      if (!db || !this.currentUser) return;
       this.isSyncing = true;
 
       db.collection('ppm_system').doc('meta').onSnapshot(async (docSnapshot) => {
@@ -129,7 +189,7 @@ document.addEventListener('alpine:init', () => {
       localStorage.setItem('ppm_phones', JSON.stringify(this.phones));
       localStorage.setItem('ppm_categories', JSON.stringify(this.categories));
 
-      if (!db) return;
+      if (!db || !this.currentUser) return;
       this.isSyncing = true;
 
       try {
@@ -163,7 +223,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     // =========================================================================
-    // FUNGSI EDIT DETAIL ASET
+    // FUNGSI EDIT & PADAM ASET
     // =========================================================================
     openEditModal(item) {
       this.editingOriginalTag = item.tag;
@@ -187,7 +247,6 @@ document.addEventListener('alpine:init', () => {
     saveEditAsset() {
       const idx = this.phones.findIndex(p => p.tag === this.editingOriginalTag);
       if (idx !== -1) {
-        // Kemas kini medan aset tanpa mengusik rekod checklist semakan yang telah ditanda
         this.phones[idx].tag = this.editingAsset.tag.trim();
         this.phones[idx].category = this.editingAsset.category;
         this.phones[idx].model = this.editingAsset.model.trim();
@@ -214,6 +273,9 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
+    // =========================================================================
+    // PENAPIS & CARIAN ASET
+    // =========================================================================
     get searchResults() {
       if (!this.searchQuery.trim()) return [];
       const q = this.searchQuery.trim().toLowerCase();
@@ -226,9 +288,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     get filteredAssetsByCategory() {
-      if (this.selectedCategoryTab === 'All') {
-        return this.phones;
-      }
+      if (this.selectedCategoryTab === 'All') return this.phones;
       return this.phones.filter(item => item.category === this.selectedCategoryTab);
     },
 
@@ -247,28 +307,16 @@ document.addEventListener('alpine:init', () => {
       return this.phones.filter(item => item.category === cat).length;
     },
 
+    // =========================================================================
+    // KAWALAN CHECKLIST PUKAL & KATEGORI
+    // =========================================================================
     clearAllChecklistsBulk() {
       this.phones.forEach(item => {
-        item.cctvPhysical = '';
-        item.picQuality = '';
-        item.viewFocus = '';
-        item.recording = '';
-        item.playback = '';
-        item.ptzVolt = '';
-        item.ptzPattern = '';
-
-        item.magLock = '';
-        item.readerIn = '';
-        item.readerOut = '';
-        item.pushBtn = '';
-        item.breakGlass = '';
-        item.doorSensor = '';
-        item.keySwitch = '';
-
-        item.physicalCheck = '';
-        item.callIn = '';
-        item.callOut = '';
-
+        item.cctvPhysical = ''; item.picQuality = ''; item.viewFocus = '';
+        item.recording = ''; item.playback = ''; item.ptzVolt = ''; item.ptzPattern = '';
+        item.magLock = ''; item.readerIn = ''; item.readerOut = ''; item.pushBtn = '';
+        item.breakGlass = ''; item.doorSensor = ''; item.keySwitch = '';
+        item.physicalCheck = ''; item.callIn = ''; item.callOut = '';
         item.remarks = '';
       });
       this.saveData();
@@ -277,29 +325,13 @@ document.addEventListener('alpine:init', () => {
 
     setAllChecklistsBulkOK() {
       this.phones.forEach(item => {
-        const isPTZ = (item.desc && item.desc.toUpperCase().includes('PTZ')) || 
-                      (item.model && item.model.toUpperCase().includes('PTZ'));
-
-        item.cctvPhysical = 'OK';
-        item.picQuality = 'OK';
-        item.viewFocus = 'OK';
-        item.recording = 'OK';
-        item.playback = 'OK';
-        item.ptzVolt = isPTZ ? 'OK' : 'N/A';
-        item.ptzPattern = isPTZ ? 'OK' : 'N/A';
-
-        item.magLock = 'OK';
-        item.readerIn = 'OK';
-        item.readerOut = 'N/A';
-        item.pushBtn = 'OK';
-        item.breakGlass = 'OK';
-        item.doorSensor = 'OK';
-        item.keySwitch = 'N/A';
-
-        item.physicalCheck = 'OK';
-        item.callIn = 'OK';
-        item.callOut = 'OK';
-
+        const isPTZ = (item.desc && item.desc.toUpperCase().includes('PTZ')) || (item.model && item.model.toUpperCase().includes('PTZ'));
+        item.cctvPhysical = 'OK'; item.picQuality = 'OK'; item.viewFocus = 'OK';
+        item.recording = 'OK'; item.playback = 'OK';
+        item.ptzVolt = isPTZ ? 'OK' : 'N/A'; item.ptzPattern = isPTZ ? 'OK' : 'N/A';
+        item.magLock = 'OK'; item.readerIn = 'OK'; item.readerOut = 'N/A';
+        item.pushBtn = 'OK'; item.breakGlass = 'OK'; item.doorSensor = 'OK'; item.keySwitch = 'N/A';
+        item.physicalCheck = 'OK'; item.callIn = 'OK'; item.callOut = 'OK';
         item.remarks = '';
       });
       this.saveData();
@@ -308,14 +340,8 @@ document.addEventListener('alpine:init', () => {
 
     addNewCategory() {
       const cat = this.newCategoryName.trim();
-      if (!cat) {
-        alert('Sila masukkan nama kategori!');
-        return;
-      }
-      if (this.categories.includes(cat)) {
-        alert('Kategori ini sudah wujud!');
-        return;
-      }
+      if (!cat) return alert('Sila masukkan nama kategori!');
+      if (this.categories.includes(cat)) return alert('Kategori ini sudah wujud!');
       this.categories.push(cat);
       this.newAsset.category = cat;
       this.newCategoryName = '';
@@ -333,30 +359,18 @@ document.addEventListener('alpine:init', () => {
       if (confirm(msg)) {
         if (assetCount > 0) {
           this.phones.forEach(item => {
-            if (item.category === catName) {
-              item.category = 'Uncategorized';
-            }
+            if (item.category === catName) item.category = 'Uncategorized';
           });
-          if (!this.categories.includes('Uncategorized')) {
-            this.categories.push('Uncategorized');
-          }
+          if (!this.categories.includes('Uncategorized')) this.categories.push('Uncategorized');
         }
-
         this.categories = this.categories.filter(c => c !== catName);
-
-        if (this.selectedCategoryTab === catName) {
-          this.selectedCategoryTab = 'All';
-        }
-
+        if (this.selectedCategoryTab === catName) this.selectedCategoryTab = 'All';
         this.saveData();
       }
     },
 
     addSingleAsset() {
-      if (!this.newAsset.tag.trim()) {
-        alert('Sila masukkan Asset ID / Tagging!');
-        return;
-      }
+      if (!this.newAsset.tag.trim()) return alert('Sila masukkan Asset ID / Tagging!');
 
       this.phones.push({
         tag: this.newAsset.tag.trim(),
@@ -366,35 +380,14 @@ document.addEventListener('alpine:init', () => {
         location: this.newAsset.location.trim() || 'Unspecified',
         desc: this.newAsset.desc.trim() || '-',
         ip: this.newAsset.ip.trim() || '-',
-
-        cctvPhysical: '',
-        picQuality: '',
-        viewFocus: '',
-        recording: '',
-        playback: '',
-        ptzVolt: '',
-        ptzPattern: '',
-
-        magLock: '',
-        readerIn: '',
-        readerOut: '',
-        pushBtn: '',
-        breakGlass: '',
-        doorSensor: '',
-        keySwitch: '',
-
-        physicalCheck: '',
-        callIn: '',
-        callOut: '',
-
+        cctvPhysical: '', picQuality: '', viewFocus: '', recording: '', playback: '', ptzVolt: '', ptzPattern: '',
+        magLock: '', readerIn: '', readerOut: '', pushBtn: '', breakGlass: '', doorSensor: '', keySwitch: '',
+        physicalCheck: '', callIn: '', callOut: '',
         remarks: ''
       });
 
       this.saveData();
-      this.newAsset.tag = '';
-      this.newAsset.model = '';
-      this.newAsset.location = '';
-      this.newAsset.ip = '';
+      this.newAsset.tag = ''; this.newAsset.model = ''; this.newAsset.location = ''; this.newAsset.ip = '';
       alert('Aset berjaya disimpan ke awan!');
     },
 
@@ -426,15 +419,12 @@ document.addEventListener('alpine:init', () => {
 
           const assetMap = new Map();
           this.phones.forEach(item => {
-            if (item.tag) {
-              assetMap.set(String(item.tag).trim().toUpperCase(), item);
-            }
+            if (item.tag) assetMap.set(String(item.tag).trim().toUpperCase(), item);
           });
 
           workbook.SheetNames.forEach(sheetName => {
             const worksheet = workbook.Sheets[sheetName];
             const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-
             if (!rawRows || rawRows.length === 0) return;
 
             let headerRowIndex = -1;
@@ -442,10 +432,10 @@ document.addEventListener('alpine:init', () => {
               const rowStr = rawRows[i].map(c => String(c).trim().toLowerCase()).join(' ');
               if (
                 rowStr.includes('asset name') ||
-                rowStr.includes('new id') || 
-                rowStr.includes('previous id') || 
-                rowStr.includes('asset id') || 
-                rowStr.includes('asset tagging') || 
+                rowStr.includes('new id') ||
+                rowStr.includes('previous id') ||
+                rowStr.includes('asset id') ||
+                rowStr.includes('asset tagging') ||
                 rowStr.includes('their asset')
               ) {
                 headerRowIndex = i;
@@ -471,11 +461,9 @@ document.addEventListener('alpine:init', () => {
                 if (!rawTag || String(rawTag).trim().length < 2) continue;
 
                 const tag = String(rawTag).trim();
-
                 let level = row['level'] || row['floor'] || row['level / floor'] || 'GF';
                 let location = row['location'] || row['device location'] || row['location name'] || 'Unspecified';
 
-                // Format kod Area (cth: RTS-ICQ-LG-DRIVEWAY-C-0602)
                 if (row['area'] && row['area'].includes('RTS-ICQ-')) {
                   const parts = row['area'].split('-');
                   if (parts.length >= 4) {
@@ -485,7 +473,6 @@ document.addEventListener('alpine:init', () => {
                 }
 
                 const ip = row['ip address'] || row['ip'] || '';
-
                 let category = 'CCTV Camera';
                 const upperSheet = sheetName.toUpperCase();
                 const upperTag = tag.toUpperCase();
