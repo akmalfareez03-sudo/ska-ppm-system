@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Senarai Aset Kategori — SKA PPM Portal</title>
+
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Firebase App, Auth & Firestore Compat SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="p-2 md:p-6 bg-slate-50 min-h-screen text-slate-800" x-data="ppmApp">
+
+  <!-- Skrin Semak Sesi -->
+  <div x-show="authChecking" class="fixed inset-0 z-50 bg-slate-900 flex flex-col items-center justify-center text-white">
+    <div class="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+    <p class="text-xs font-mono tracking-wider text-slate-300">Memuatkan senarai aset...</p>
+  </div>
+
+  <div x-cloak x-show="!authChecking && currentUser">
+
+    <!-- ==================== TOP NAVIGATION BAR ==================== -->
+    <header class="max-w-[1100px] mx-auto mb-6 bg-slate-900 text-white p-4 rounded-xl shadow no-print">
+      <div class="flex flex-wrap justify-between items-center gap-3 pb-3 border-b border-slate-700">
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-base font-bold tracking-wide">PPM Maintenance Portal (SKA ICQC)</h1>
+            <span :class="isSyncing ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : (cloudConnected ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-red-500/20 text-red-300 border-red-500/40')" 
+                  class="text-[10px] px-2 py-0.5 rounded-full border font-mono flex items-center gap-1">
+              <span class="inline-block w-1.5 h-1.5 rounded-full" :class="isSyncing ? 'bg-amber-400 animate-pulse' : (cloudConnected ? 'bg-emerald-400' : 'bg-red-400')"></span>
+              <span x-text="isSyncing ? 'Menyelaras...' : (cloudConnected ? 'Awan Aktif' : 'Luar Talian')"></span>
+            </span>
+          </div>
+          <p class="text-xs text-slate-400">
+            Pengguna: <span class="text-slate-200 font-mono" x-text="currentUser?.email"></span>
+          </p>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button @click="logoutUser" class="bg-red-600/90 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow transition">
+            🚪 Keluar
+          </button>
+        </div>
+      </div>
+
+      <!-- Navigasi Antara Fail HTML -->
+      <nav class="flex flex-wrap gap-2 pt-3">
+        <a href="index.html" class="bg-slate-800 text-slate-300 hover:bg-slate-700 px-4 py-1.5 rounded-lg text-xs font-semibold transition">
+          🔍 1. Carian Aset & Pendaftaran
+        </a>
+        <a href="assets.html" class="bg-indigo-600 text-white shadow px-4 py-1.5 rounded-lg text-xs font-semibold transition">
+          📂 2. Senarai Aset Mengikut Kategori (<span x-text="phones.length"></span>)
+        </a>
+        <a href="checklist.html" class="bg-slate-800 text-slate-300 hover:bg-slate-700 px-4 py-1.5 rounded-lg text-xs font-semibold transition">
+          📄 3. Pratonton Borang & Laporan Rasmi (Landscape)
+        </a>
+      </nav>
+    </header>
+
+    <!-- ==================== KANDUNGAN HALAMAN 2 ==================== -->
+    <main class="max-w-[1100px] mx-auto space-y-4">
+      
+      <div class="bg-white p-4 rounded-xl shadow-md border border-slate-200">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-xs font-bold uppercase text-slate-700">Tapis Kategori Peranti:</h3>
+          <button x-show="phones.length > 0" @click="clearAll" class="text-xs text-red-500 hover:underline">Padam Semua Rekod</button>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <button @click="selectedCategoryTab = 'All'" 
+            :class="selectedCategoryTab === 'All' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold transition">
+            Semua Aset (<span x-text="phones.length"></span>)
+          </button>
+
+          <template x-for="cat in categories" :key="cat">
+            <div class="inline-flex items-center rounded-lg overflow-hidden border border-slate-200 transition"
+                 :class="selectedCategoryTab === cat ? 'bg-indigo-600 text-white border-indigo-600 shadow' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'">
+              <button type="button" @click="selectedCategoryTab = cat" class="px-3 py-1.5 text-xs font-semibold">
+                <span x-text="cat"></span> (<span x-text="countByCategory(cat)"></span>)
+              </button>
+              <button type="button" @click.stop="deleteCategory(cat)" title="Padam kategori ini"
+                      class="px-2 py-1.5 text-xs font-bold hover:bg-red-500 hover:text-white transition opacity-70 hover:opacity-100">
+                ✕
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div class="bg-white p-5 rounded-xl shadow-md border border-slate-200">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="bg-slate-100 text-slate-700 border-b">
+                <th class="p-2">No</th>
+                <th class="p-2">Asset Tag</th>
+                <th class="p-2">Kategori</th>
+                <th class="p-2">Model / Jenis</th>
+                <th class="p-2">Aras</th>
+                <th class="p-2">Lokasi</th>
+                <th class="p-2">Alamat IP</th>
+                <th class="p-2 text-center">Tindakan</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <template x-for="(item, idx) in filteredAssetsByCategory" :key="idx">
+                <tr class="hover:bg-slate-50">
+                  <td class="p-2 font-mono" x-text="idx + 1"></td>
+                  <td class="p-2 font-bold font-mono text-indigo-700" x-text="item.tag"></td>
+                  <td class="p-2"><span class="px-2 py-0.5 rounded bg-slate-200 text-[10px]" x-text="item.category"></span></td>
+                  <td class="p-2 font-mono" x-text="item.category === 'CCTV Camera' ? (item.desc + ' (' + item.model + ')') : item.model"></td>
+                  <td class="p-2 font-semibold" x-text="item.level"></td>
+                  <td class="p-2 text-slate-600" x-text="item.location"></td>
+                  <td class="p-2 font-mono text-slate-500" x-text="item.ip"></td>
+                  <td class="p-2 text-center space-x-2 whitespace-nowrap">
+                    <button @click="openEditModal(item)" class="text-indigo-600 hover:text-indigo-800 font-semibold text-[11px] underline">Edit</button>
+                    <button @click="deleteAssetByItem(item)" class="text-red-500 hover:text-red-700 font-semibold text-[11px]">Padam</button>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="filteredAssetsByCategory.length === 0">
+                <td colspan="8" class="text-center py-6 text-slate-400">Tiada aset dalam kategori ini.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- MODAL EDIT ASET -->
+    <div x-cloak x-show="showEditModal" class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div @click.away="closeEditModal()" class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-slate-200 space-y-4">
+        <div class="flex justify-between items-center border-b border-slate-100 pb-3">
+          <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wide flex items-center gap-2">
+            <span>✏️</span> Kemas Kini Detail Aset
+          </h3>
+          <button @click="closeEditModal()" class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+        </div>
+
+        <form @submit.prevent="saveEditAsset()" class="space-y-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Kategori Aset</label>
+            <select x-model="editingAsset.category" class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+              <template x-for="cat in categories" :key="cat">
+                <option :value="cat" x-text="cat"></option>
+              </template>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Asset Tag / ID</label>
+            <input type="text" x-model="editingAsset.tag" required class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 font-mono focus:ring-2 focus:ring-indigo-500 outline-none">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Model / Perkakasan</label>
+              <input type="text" x-model="editingAsset.model" class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Jenis / Description</label>
+              <input type="text" x-model="editingAsset.desc" class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Aras (Level)</label>
+              <input type="text" x-model="editingAsset.level" class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Alamat IP</label>
+              <input type="text" x-model="editingAsset.ip" class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 font-mono focus:ring-2 focus:ring-indigo-500 outline-none">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Lokasi Peranti</label>
+            <input type="text" x-model="editingAsset.location" class="w-full px-3 py-2 border rounded-lg text-xs border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+          </div>
+          <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+            <button type="button" @click="closeEditModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition">Batal</button>
+            <button type="submit" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow transition">Simpan Perubahan</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>

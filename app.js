@@ -23,11 +23,10 @@ try {
 }
 
 // =========================================================================
-// 2. ALPINE.JS APLIKASI PPM
+// 2. ALPINE.JS APLIKASI PPM (MULTI-PAGE SUPPORT)
 // =========================================================================
 document.addEventListener('alpine:init', () => {
   Alpine.data('ppmApp', () => ({
-    // Status Pengesahan Pengguna (Authentication)
     currentUser: null,
     authChecking: true,
     loginEmail: '',
@@ -35,9 +34,7 @@ document.addEventListener('alpine:init', () => {
     loginError: '',
     isLoggingIn: false,
 
-    currentView: 'main', // 'main', 'category_list', 'checklist'
-    selectedReportType: 'CCTV', // 'CCTV', 'ACS', atau 'IP Phone'
-
+    selectedReportType: 'CCTV',
     projectName: 'RTS LINK ICQC BUKIT CHAGAR',
     monthYear: new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' }).toUpperCase(),
     currentDate: new Date().toISOString().split('T')[0],
@@ -88,7 +85,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     // =========================================================================
-    // PENGURUSAN LOG MASUK & SESI PENGGUNA (FIREBASE AUTH)
+    // PENGURUSAN AUTO-REDIRECT ANTARA LOGIN.HTML & HALAMAN SISTEM
     // =========================================================================
     initAuthListener() {
       if (!auth) {
@@ -96,12 +93,24 @@ document.addEventListener('alpine:init', () => {
         return;
       }
 
+      const isLoginPage = window.location.pathname.toLowerCase().endsWith('login.html');
+
       auth.onAuthStateChanged((user) => {
         this.currentUser = user;
-        this.authChecking = false;
 
         if (user) {
+          if (isLoginPage) {
+            window.location.replace('index.html');
+            return;
+          }
+          this.authChecking = false;
           this.initCloudListener();
+        } else {
+          if (!isLoginPage) {
+            window.location.replace('login.html');
+            return;
+          }
+          this.authChecking = false;
         }
       });
     },
@@ -113,8 +122,7 @@ document.addEventListener('alpine:init', () => {
 
       try {
         await auth.signInWithEmailAndPassword(this.loginEmail.trim(), this.loginPassword);
-        this.loginEmail = '';
-        this.loginPassword = '';
+        window.location.replace('index.html');
       } catch (err) {
         console.error("Ralat log masuk:", err);
         if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
@@ -133,7 +141,7 @@ document.addEventListener('alpine:init', () => {
       if (!auth) return;
       if (confirm('Adakah anda pasti mahu log keluar dari sistem?')) {
         await auth.signOut();
-        this.currentUser = null;
+        window.location.replace('login.html');
       }
     },
 
@@ -279,7 +287,7 @@ document.addEventListener('alpine:init', () => {
     get searchResults() {
       if (!this.searchQuery.trim()) return [];
       const q = this.searchQuery.trim().toLowerCase();
-      return this.phones.filter(item => 
+      return this.phones.filter(item =>
         (item.tag && item.tag.toLowerCase().includes(q)) ||
         (item.ip && item.ip.toLowerCase().includes(q)) ||
         (item.location && item.location.toLowerCase().includes(q)) ||
@@ -413,7 +421,7 @@ document.addEventListener('alpine:init', () => {
         try {
           const data = new Uint8Array(e.target.result);
           const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-          
+
           let addedCount = 0;
           let updatedCount = 0;
 

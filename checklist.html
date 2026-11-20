@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pratonton Borang Rasmi — SKA PPM Portal</title>
+
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+  <!-- Firebase App, Auth & Firestore Compat SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="p-2 md:p-6 bg-slate-50 min-h-screen text-slate-800" x-data="ppmApp">
+
+  <!-- Skrin Semak Sesi -->
+  <div x-show="authChecking" class="fixed inset-0 z-50 bg-slate-900 flex flex-col items-center justify-center text-white no-print">
+    <div class="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+    <p class="text-xs font-mono tracking-wider text-slate-300">Menyediakan borang laporan...</p>
+  </div>
+
+  <div x-cloak x-show="!authChecking && currentUser">
+
+    <!-- ==================== TOP NAVIGATION BAR ==================== -->
+    <header class="max-w-[1100px] mx-auto mb-6 bg-slate-900 text-white p-4 rounded-xl shadow no-print">
+      <div class="flex flex-wrap justify-between items-center gap-3 pb-3 border-b border-slate-700">
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-base font-bold tracking-wide">PPM Maintenance Portal (SKA ICQC)</h1>
+            <span :class="isSyncing ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : (cloudConnected ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-red-500/20 text-red-300 border-red-500/40')" 
+                  class="text-[10px] px-2 py-0.5 rounded-full border font-mono flex items-center gap-1">
+              <span class="inline-block w-1.5 h-1.5 rounded-full" :class="isSyncing ? 'bg-amber-400 animate-pulse' : (cloudConnected ? 'bg-emerald-400' : 'bg-red-400')"></span>
+              <span x-text="isSyncing ? 'Menyelaras...' : (cloudConnected ? 'Awan Aktif' : 'Luar Talian')"></span>
+            </span>
+          </div>
+          <p class="text-xs text-slate-400">
+            Pengguna: <span class="text-slate-200 font-mono" x-text="currentUser?.email"></span>
+          </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <button @click="printChecklist" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow flex items-center gap-1.5 transition">
+            🖨️ Cetak / Simpan PDF
+          </button>
+          <button @click="downloadDocxChecklist" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow flex items-center gap-1.5 transition">
+            📥 Muat Turun Word (.docx)
+          </button>
+          <button @click="logoutUser" class="bg-red-600/90 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow transition">
+            🚪 Keluar
+          </button>
+        </div>
+      </div>
+
+      <!-- Navigasi Antara Fail HTML -->
+      <nav class="flex flex-wrap gap-2 pt-3">
+        <a href="index.html" class="bg-slate-800 text-slate-300 hover:bg-slate-700 px-4 py-1.5 rounded-lg text-xs font-semibold transition">
+          🔍 1. Carian Aset & Pendaftaran
+        </a>
+        <a href="assets.html" class="bg-slate-800 text-slate-300 hover:bg-slate-700 px-4 py-1.5 rounded-lg text-xs font-semibold transition">
+          📂 2. Senarai Aset Mengikut Kategori (<span x-text="phones.length"></span>)
+        </a>
+        <a href="checklist.html" class="bg-indigo-600 text-white shadow px-4 py-1.5 rounded-lg text-xs font-semibold transition">
+          📄 3. Pratonton Borang & Laporan Rasmi (Landscape)
+        </a>
+      </nav>
+    </header>
+
+    <!-- ==================== KANDUNGAN HALAMAN 3 ==================== -->
+    <main class="max-w-[1100px] mx-auto space-y-8 print:space-y-0">
+      
+      <!-- Kawalan Format & Pukal -->
+      <div class="bg-white p-3 rounded-xl border border-slate-200 flex flex-wrap justify-between items-center gap-3 no-print">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs font-bold uppercase text-slate-700">Pilih Format:</span>
+          <button @click="selectedReportType = 'CCTV'; footerTitle = 'Maintenance Checklist / CCTV'" 
+            :class="selectedReportType === 'CCTV' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 text-slate-700'"
+            class="px-3 py-1 rounded-lg text-xs font-semibold transition">
+            📹 CCTV System
+          </button>
+          <button @click="selectedReportType = 'ACS'; footerTitle = 'Maintenance Checklist / ACS'" 
+            :class="selectedReportType === 'ACS' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 text-slate-700'"
+            class="px-3 py-1 rounded-lg text-xs font-semibold transition">
+            🔐 Electronic Access Card (ACS)
+          </button>
+          <button @click="selectedReportType = 'IP Phone'; footerTitle = 'Maintenance Checklist / Phone'" 
+            :class="selectedReportType === 'IP Phone' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 text-slate-700'"
+            class="px-3 py-1 rounded-lg text-xs font-semibold transition">
+            ☎️ IP Phone / PABX
+          </button>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button @click="clearAllChecklistsBulk()" class="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-semibold px-3 py-1 rounded-lg shadow-sm">
+            ✍️ Kosongkan Semua Checklist (Pukal)
+          </button>
+          <button @click="setAllChecklistsBulkOK()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-semibold px-3 py-1 rounded-lg shadow-sm">
+            Set Semua OK
+          </button>
+        </div>
+      </div>
+
+      <template x-for="(pageRows, pageIdx) in phonePages" :key="pageIdx">
+        <div class="page-container bg-white p-6 md:p-8 shadow-lg rounded-xl">
+          <div>
+            <!-- Pengepala Rasmi SKA -->
+            <div class="ska-header-box">
+              <div class="w-28 flex-shrink-0 text-center">
+                <img src="logo_ska.png" alt="SKA Logo" class="h-14 mx-auto object-contain">
+              </div>
+              <div class="flex-1 text-center px-2">
+                <h2 class="font-bold text-xs tracking-wide text-slate-900">SKA TECHNOLOGY SDN. BHD. <span class="font-normal">(552680-M)</span></h2>
+                <p class="text-[9px] text-slate-600 leading-tight">No. 26, Jalan Siput Akek, Taman Billion, Cheras, 56000 Kuala Lumpur</p>
+                <div class="text-[9px] text-slate-600 flex justify-center gap-6 mt-0.5">
+                  <span><strong>Tel:</strong> 603-9130 5371, 9131 5371</span>
+                  <span><strong>Fax:</strong> 603-91305372</span>
+                </div>
+                <div class="text-[9px] text-slate-600 flex justify-center gap-6">
+                  <span><strong>Email:</strong> skatech@skatech.com.my</span>
+                  <span><strong>Website:</strong> www.skatech.com.my</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 flex-shrink-0 border-l border-dashed border-slate-400 pl-3">
+                <img src="logo_mrts.png" alt="MRTS Logo" class="h-10 object-contain">
+                <img src="logo_ijm.png" alt="IJM Logo" class="h-10 object-contain">
+              </div>
+            </div>
+
+            <!-- Tajuk Dokumen Rasmi -->
+            <div class="text-center mb-3">
+              <h2 class="text-xs md:text-sm font-bold uppercase tracking-wider">PREVENTIVE MAINTENANCE: <span x-text="projectName"></span></h2>
+              <h3 class="text-[11px] md:text-xs font-semibold uppercase mt-0.5">MAINTENANCE CHECKLIST (<span x-text="monthYear"></span>)</h3>
+              <h4 class="text-[11px] font-bold uppercase mt-0.5 text-slate-700" 
+                  x-text="selectedReportType === 'CCTV' ? 'CCTV SYSTEM (INTERNAL BUILDING)' : (selectedReportType === 'ACS' ? 'ELECTRONIC ACCESS CARD SYSTEM' : 'IP PABX SYSTEM & IP PHONE')">
+              </h4>
+            </div>
+
+            <!-- JADUAL FORMAT CCTV SYSTEM -->
+            <div class="mb-2" x-show="selectedReportType === 'CCTV'">
+              <table class="official-table">
+                <thead>
+                  <tr>
+                    <th style="width: 2.5%;">NO</th>
+                    <th style="width: 12%;">ASSET ID</th>
+                    <th style="width: 4%;">LEVEL</th>
+                    <th style="width: 14%;">LOCATION</th>
+                    <th style="width: 8%;">DEVICE TYPE</th>
+                    <th style="width: 9.5%;">IP ADDRESS</th>
+                    <th style="width: 6.5%;">PYSICAL CHECK</th>
+                    <th style="width: 6.5%;">PICTURE QUALITY</th>
+                    <th style="width: 7%;">CAMERA VIEW FOCUS</th>
+                    <th style="width: 6.5%;">RECORDING</th>
+                    <th style="width: 6.5%;">PLAYBACK</th>
+                    <th style="width: 5.5%;">PTZ VOLTAGE</th>
+                    <th style="width: 6%;">PTZ PRESET & PATTERN</th>
+                    <th style="width: 7%;">REMARKS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(ph, rowIdx) in pageRows" :key="rowIdx">
+                    <tr>
+                      <td class="text-center font-bold" x-text="pageIdx * 20 + rowIdx + 1"></td>
+                      <td class="font-bold font-mono text-slate-900" x-text="ph.tag"></td>
+                      <td class="text-center font-semibold" x-text="ph.level"></td>
+                      <td x-text="ph.location"></td>
+                      <td class="font-mono text-center text-[10px]" x-text="ph.desc"></td>
+                      <td class="font-mono text-[10px]" x-text="ph.ip"></td>
+                      <td class="text-center"><select x-model="ph.cctvPhysical" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.picQuality" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.viewFocus" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.recording" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.playback" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.ptzVolt" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.ptzPattern" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td><input type="text" x-model="ph.remarks" @change="saveData()" class="w-full bg-transparent text-[10px] outline-none"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- JADUAL FORMAT ACS -->
+            <div class="mb-2" x-show="selectedReportType === 'ACS'">
+              <table class="official-table">
+                <thead>
+                  <tr>
+                    <th style="width: 3%;">NO</th>
+                    <th style="width: 13%;">ASSET ID</th>
+                    <th style="width: 18%;">LOCATION</th>
+                    <th style="width: 4%;">LEVEL</th>
+                    <th style="width: 7%;">MAGNETIC LOCK</th>
+                    <th style="width: 7%;">READER (IN)</th>
+                    <th style="width: 7%;">READER (OUT)</th>
+                    <th style="width: 8%;">EXIT PUSH BUTTON</th>
+                    <th style="width: 7%;">BREAK GLASS</th>
+                    <th style="width: 7%;">DOOR SENSOR</th>
+                    <th style="width: 6%;">KEY SWITCH</th>
+                    <th style="width: 13%;">REMARKS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(ph, rowIdx) in pageRows" :key="rowIdx">
+                    <tr>
+                      <td class="text-center font-bold" x-text="pageIdx * 20 + rowIdx + 1"></td>
+                      <td class="font-bold font-mono text-slate-900" x-text="ph.tag"></td>
+                      <td x-text="ph.location"></td>
+                      <td class="text-center font-semibold" x-text="ph.level"></td>
+                      <td class="text-center"><select x-model="ph.magLock" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.readerIn" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.readerOut" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.pushBtn" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.breakGlass" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.doorSensor" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.keySwitch" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td><input type="text" x-model="ph.remarks" @change="saveData()" class="w-full bg-transparent text-[10px] outline-none"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- JADUAL FORMAT IP PHONE / PABX -->
+            <div class="mb-2" x-show="selectedReportType === 'IP Phone'">
+              <table class="official-table">
+                <thead>
+                  <tr>
+                    <th style="width: 3%;">NO</th>
+                    <th style="width: 14%;">ASSET ID</th>
+                    <th style="width: 4%;">LEVEL</th>
+                    <th style="width: 20%;">LOCATION</th>
+                    <th style="width: 9%;">MODEL</th>
+                    <th style="width: 11%;">DESCRIPTION</th>
+                    <th style="width: 11%;">IP ADDRESS</th>
+                    <th style="width: 7%;">PHYSICAL CHECK</th>
+                    <th style="width: 6%;">CALL IN</th>
+                    <th style="width: 6%;">CALL OUT</th>
+                    <th style="width: 9%;">REMARKS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(ph, rowIdx) in pageRows" :key="rowIdx">
+                    <tr>
+                      <td class="text-center font-bold" x-text="pageIdx * 20 + rowIdx + 1"></td>
+                      <td class="font-bold font-mono text-slate-900" x-text="ph.tag"></td>
+                      <td class="text-center font-semibold" x-text="ph.level"></td>
+                      <td x-text="ph.location"></td>
+                      <td class="font-mono text-center" x-text="ph.model"></td>
+                      <td class="font-mono text-slate-700" x-text="ph.desc"></td>
+                      <td class="font-mono" x-text="ph.ip"></td>
+                      <td class="text-center"><select x-model="ph.physicalCheck" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.callIn" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td class="text-center"><select x-model="ph.callOut" @change="saveData()" class="bg-transparent font-bold text-center outline-none cursor-pointer"><option value=""></option><option value="OK">OK</option><option value="NO">NO</option><option value="N/A">N/A</option></select></td>
+                      <td><input type="text" x-model="ph.remarks" @change="saveData()" class="w-full bg-transparent text-[11px] outline-none"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Ruangan Catatan -->
+            <template x-if="pageIdx === phonePages.length - 1">
+              <div class="mt-2 mb-1">
+                <label class="block text-[10px] font-bold uppercase text-slate-800">NOTES AND DISCREPANCIES:</label>
+                <textarea x-model="notesDiscrepancies" @change="saveData()" rows="2" class="w-full border border-slate-400 rounded p-1 text-[11px] text-slate-800 mt-0.5 outline-none"></textarea>
+              </div>
+            </template>
+          </div>
+
+          <!-- Footer Halaman Rasmi -->
+          <table class="official-footer-table">
+            <tr>
+              <td style="width: 18%;" class="text-center font-bold text-[9px] leading-tight">SKA Technology Sdn. Bhd.</td>
+              <td style="width: 37%;" class="text-[9px]">
+                <div class="flex items-center gap-1">
+                  <span class="font-semibold flex-shrink-0">Title:</span>
+                  <input type="text" x-model="footerTitle" class="w-full bg-transparent font-medium italic outline-none border-b border-transparent hover:border-slate-300 focus:border-indigo-500">
+                  <span class="font-semibold flex-shrink-0" x-text="'/ ' + monthYear"></span>
+                </div>
+              </td>
+              <td style="width: 33%;" class="text-[9px]">Tested by (Signature & Name):</td>
+              <td style="width: 12%;" class="text-[9px]">Date: <span x-text="currentDate"></span></td>
+            </tr>
+            <tr>
+              <td class="text-center text-[9px] text-slate-600">Project Reference:</td>
+              <td class="text-[9px]"><input type="text" x-model="footerProjectName" class="w-full bg-transparent font-bold uppercase outline-none border-b border-transparent hover:border-slate-300 focus:border-indigo-500"></td>
+              <td class="text-[9px]">Witness by (Signature & Name):</td>
+              <td class="text-[9px] font-bold" x-text="'Page: ' + (pageIdx + 1)"></td>
+            </tr>
+          </table>
+        </div>
+      </template>
+
+    </main>
+
+  </div>
+
+</body>
+</html>
